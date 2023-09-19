@@ -205,20 +205,20 @@ io.on("connection", (socket) => {
     const topicParts = topic.split("/");
     const dynamicPart = `/${topicParts.slice(3).join("/")}`;
 
-    if (dynamicPart == batteryLevel) {
-      axios.post(baseApiUrl + apiBatteryUrl, {
-        robot_uuid: topicParts[2],
-        charging: payload,
-        battery_level: "",
-      });
-    }
-    if (dynamicPart == batteryCharge) {
-      axios.post(baseApiUrl + apiBatteryUrl, {
-        robot_uuid: topicParts[2],
-        charging: "",
-        battery_level: payload,
-      });
-    }
+    // if (dynamicPart == batteryLevel) {
+    //   axios.post(baseApiUrl + apiBatteryUrl, {
+    //     robot_uuid: topicParts[2],
+    //     charging: payload,
+    //     battery_level: "",
+    //   });
+    // }
+    // if (dynamicPart == batteryCharge) {
+    //   axios.post(baseApiUrl + apiBatteryUrl, {
+    //     robot_uuid: topicParts[2],
+    //     charging: false,
+    //     battery_level: payload,
+    //   });
+    // }
     if (dynamicPart == appConnection) {
       let parsePayload = JSON.parse(payload);
 

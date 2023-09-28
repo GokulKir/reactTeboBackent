@@ -120,15 +120,20 @@ io.on("connection", (socket) => {
 
   socket.join(socket.user);
   console.log(socket.user, "Connected");
+ console.log(io.sockets.clients(),"io.sockets.clients()")
   socket.on("call", (data) => {
     let calleeId = data.calleeId;
     let rtcMessage = data.rtcMessage;
+
+    console.log(connectedUsers,"🥴");
 
     socket.to(calleeId).emit("newCall", {
       callerId: socket.user,
       rtcMessage: rtcMessage,
     });
   });
+
+
 
   socket.on("answerCall", (data) => {
     let callerId = data.callerId;
@@ -228,11 +233,7 @@ io.on("connection", (socket) => {
     const key = getKeyByValue(peerConnectedUser, topicParts[2]);
 //  console.log(dynamicPart,"dynamicPart");
     if (dynamicPart == obstacle) {
-      let socketId = connectedUsers.get(key);
-      console.log('================obstacle====================');
-      console.log(peerConnectedUser,dynamicPart,socketId,key,topicParts[2]);
-      console.log('====================================');
-      
+      let socketId = connectedUsers.get(key);      
       io.to(socketId).emit("obstacleDetected", payload);
     }
 
@@ -424,6 +425,9 @@ io.on("connection", (socket) => {
   socket.on("meeting-ended", (payload) => {
     const callData = "call ended";
     console.log(baseMqttTopic + `${payload?.id}` + callState, "call ended");
+    socket.to(payload?.id).emit("callEndInfo", {
+      data: callData,
+    });
     client.publish(
       baseMqttTopic + `${payload?.id}` + callState,
       callData,

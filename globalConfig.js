@@ -4,7 +4,8 @@ const userData = "/devlacus/hubo";
 const baseMqttTopic = "Devlacus/Tebo/"
 var moveManual = "/move/manual"
 // var moveCamera = "/action/deleteMap"
-var moveCamera = "move/tilt"
+
+var moveCamera = "/move/tilt"
 const gotoHome  = "/action/goHome"
 const gotoDock = "/info/dock"
 const meetingEnd = "/info/meetend"
@@ -19,7 +20,8 @@ const stopMapping = "/action/stopMapping";
 const deleteMap = '/action/deleteMap';
 const readyState = "/info/readyState";
 
-const mapState = "/info/mapState"
+const mapState = "/info/mapState";
+ 
 
 // const getAllChannel = "https://tebo.domainenroll.com/api/v1"
 
@@ -27,6 +29,7 @@ const mapState = "/info/mapState"
 const baseApiUrl = "https://tebo.domainenroll.com/api/v1"
 
 const apiBatteryUrl = '/battery-details'
+const mapStatus ='/update-mapping-status';
 
 
 module.exports = {
@@ -41,6 +44,7 @@ module.exports = {
     batteryLevel,
     baseApiUrl,
     apiBatteryUrl,
+    mapStatus,
     batteryCharge,
     appConnection,
     obstacle,

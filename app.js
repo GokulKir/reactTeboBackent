@@ -25,7 +25,7 @@ const {
   stopMapping,
   deleteMap,
   mapState,
-  readyState,
+  readyState,mapStatus,
 } = require("./globalConfig");
 const axios = require("axios");
 
@@ -47,7 +47,6 @@ const clientId = `mqtt_${Math.random().toString(16).slice(3)}`;
 const connectUrl = `mqtt://${host}:${port}`;
 const password = "de120467";
 const username = "domainenroll";
-
 
 // const host = "44.202.67.39";
 // const port = "1883";
@@ -120,20 +119,20 @@ io.on("connection", (socket) => {
 
   socket.join(socket.user);
   console.log(socket.user, "Connected");
- console.log(io.sockets.clients(),"io.sockets.clients()")
+
+
+  //  console.log(io.sockets?.clients(),"io.sockets.clients()")
   socket.on("call", (data) => {
     let calleeId = data.calleeId;
     let rtcMessage = data.rtcMessage;
 
-    console.log(connectedUsers,"🥴");
+    console.log(connectedUsers, "🥴");
 
     socket.to(calleeId).emit("newCall", {
       callerId: socket.user,
       rtcMessage: rtcMessage,
     });
   });
-
-
 
   socket.on("answerCall", (data) => {
     let callerId = data.callerId;
@@ -209,21 +208,31 @@ io.on("connection", (socket) => {
     // Emit the custom event to the frontend
     const topicParts = topic.split("/");
     const dynamicPart = `/${topicParts.slice(3).join("/")}`;
+    if (dynamicPart == batteryLevel) {
+      var str = `'${payload}'`;
+      str = str.replace(/[^0-9]/g, "");
+      let batteryPercentage = parseInt(str, 10);
 
-    // if (dynamicPart == batteryLevel) {
-    //   axios.post(baseApiUrl + apiBatteryUrl, {
-    //     robot_uuid: topicParts[2],
-    //     charging: payload,
-    //     battery_level: "",
-    //   });
-    // }
-    // if (dynamicPart == batteryCharge) {
-    //   axios.post(baseApiUrl + apiBatteryUrl, {
-    //     robot_uuid: topicParts[2],
-    //     charging: false,
-    //     battery_level: payload,
-    //   });
-    // }
+      axios.post(baseApiUrl + apiBatteryUrl, {
+        robot_uuid: topicParts[2],
+        charging: false,
+        battery_level: batteryPercentage,
+      });
+    }
+    if (dynamicPart == batteryCharge) {
+      var str = `'${payload}'`;
+      str = str.replace(/[^0-9]/g, "");
+      let chargingState = parseInt(str, 10);
+
+      console.log("====================================");
+      console.log(typeof payload, dynamicPart, payload, chargingState);
+      console.log("====================================");
+      axios.post(baseApiUrl + apiBatteryUrl, {
+        robot_uuid: topicParts[2],
+        charging: chargingState,
+        battery_level: null,
+      });
+    }
     if (dynamicPart == appConnection) {
       let parsePayload = JSON.parse(payload);
 
@@ -231,16 +240,20 @@ io.on("connection", (socket) => {
       io.to(socketId).emit("mqttMessageReceived", payload);
     }
     const key = getKeyByValue(peerConnectedUser, topicParts[2]);
-//  console.log(dynamicPart,"dynamicPart");
+    //  console.log(dynamicPart,"dynamicPart");
     if (dynamicPart == obstacle) {
-      let socketId = connectedUsers.get(key);      
+      let socketId = connectedUsers.get(key);
       io.to(socketId).emit("obstacleDetected", payload);
     }
 
-    
     if (dynamicPart == mapState) {
       let socketId = connectedUsers.get(key);
       io.to(socketId).emit("mapState", payload);
+      axios.post(baseApiUrl+mapStatus,{
+        status:payload,
+        robot_uuid:topicParts[2],
+        delete:false,
+      })
     }
 
     if (dynamicPart == callState) {
@@ -344,10 +357,9 @@ io.on("connection", (socket) => {
     );
   });
 
-  
-// Start Mapping
+  // Start Mapping
   socket.on("start-mapping", (payload) => {
-    console.log("jjjjj",payload);
+    console.log("jjjjj", payload);
     const StartCallData = " ";
     client.publish(
       baseMqttTopic + `${payload?.id}` + startMapping,
@@ -361,10 +373,9 @@ io.on("connection", (socket) => {
     );
   });
 
-  
   // stopMapping
   socket.on("stopMapping", (payload) => {
-    console.log("stopMapping",payload);
+    console.log("stopMapping", payload);
     let StopCallData = " ";
     client.publish(
       baseMqttTopic + `${payload?.id}` + stopMapping,
@@ -378,11 +389,13 @@ io.on("connection", (socket) => {
     );
   });
 
-
-  
-
   socket.on("deleteMap", (payload) => {
-    console.log("stopMapping",payload);
+    console.log("deleteMap", payload);
+    axios.post(baseApiUrl+mapStatus,{
+      status:'no map',
+      robot_uuid:payload,
+      delete:true,
+    })
     let StopCallData = " ";
     client.publish(
       baseMqttTopic + `${payload?.id}` + deleteMap,
@@ -399,8 +412,6 @@ io.on("connection", (socket) => {
   //   console.log("Received start-mapping event");
   //   // Your server-side logic here
   // });
-
-
 
   // start-meeting
   socket.on("start-meeting", (payload) => {

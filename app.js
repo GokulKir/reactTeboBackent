@@ -220,9 +220,11 @@ io.on("connection", (socket) => {
       });
     }
     if (dynamicPart == batteryCharge) {
-      var str = `'${payload}'`;
-      str = str.replace(/[^0-9]/g, "");
-      let chargingState = parseInt(str, 10);
+      // var str = `'${payload}'`;
+      // str = str.replace(/[^0-9]/g, "");
+
+      let chargingState  = payload === "true";
+
 
       console.log("====================================");
       console.log(typeof payload, dynamicPart, payload, chargingState);
@@ -248,7 +250,9 @@ io.on("connection", (socket) => {
 
     if (dynamicPart == mapState) {
       let socketId = connectedUsers.get(key);
+      console.log(payload,"mapState",connectedUsers);
       io.to(socketId).emit("mapState", payload);
+      io.sockets.emit("mapStatusBroadcastMessage",{[topicParts[2]]:payload})
       axios.post(baseApiUrl+mapStatus,{
         status:payload,
         robot_uuid:topicParts[2],

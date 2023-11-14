@@ -9,7 +9,7 @@ var moveCamera = "/move/tilt"
 const gotoHome  = "/action/goHome"
 const gotoDock = "/info/dock"
 const meetingEnd = "/info/meetend"
-const batteryLevel = "/info/çç"
+const batteryLevel = "/info/batteryLevel"
 const batteryCharge = "/info/chargingStatus"
 const appConnection ="/info/connectTebo";
 const obstacle = "/info/obstacle";
@@ -19,7 +19,7 @@ const startMapping = "/action/startMapping";
 const stopMapping = "/action/stopMapping";
 const deleteMap = '/action/deleteMap';
 const readyState = "/info/readyState";
-
+const homeState = "/info/homeState";
 const mapState = "/info/mapState";
  
 
@@ -51,6 +51,7 @@ module.exports = {
     callState,
     startCall,
     startMapping,
+    homeState,
     stopMapping,
     deleteMap,
     mapState,

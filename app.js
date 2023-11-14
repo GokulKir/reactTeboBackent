@@ -25,7 +25,9 @@ const {
   stopMapping,
   deleteMap,
   mapState,
-  readyState,mapStatus,
+  readyState,
+  mapStatus,
+  homeState,
 } = require("./globalConfig");
 const axios = require("axios");
 
@@ -120,7 +122,6 @@ io.on("connection", (socket) => {
   socket.join(socket.user);
   console.log(socket.user, "Connected");
 
-
   //  console.log(io.sockets?.clients(),"io.sockets.clients()")
   socket.on("call", (data) => {
     let calleeId = data.calleeId;
@@ -212,7 +213,6 @@ io.on("connection", (socket) => {
       var str = `'${payload}'`;
       str = str.replace(/[^0-9]/g, "");
       let batteryPercentage = parseInt(str, 10);
-
       axios.post(baseApiUrl + apiBatteryUrl, {
         robot_uuid: topicParts[2],
         charging: false,
@@ -223,8 +223,7 @@ io.on("connection", (socket) => {
       // var str = `'${payload}'`;
       // str = str.replace(/[^0-9]/g, "");
 
-      let chargingState  = payload === "true";
-
+      let chargingState = payload === "true";
 
       console.log("====================================");
       console.log(typeof payload, dynamicPart, payload, chargingState);
@@ -247,17 +246,30 @@ io.on("connection", (socket) => {
       let socketId = connectedUsers.get(key);
       io.to(socketId).emit("obstacleDetected", payload);
     }
+    if (dynamicPart == homeState) {
+      let socketId = connectedUsers.get(key);
+      console.log(
+        socketId,
+        "====================connectedUsers================",
+        connectedUsers
+      );
+      console.log(payload, "payload");
 
+      console.log("====================================");
+      io.to(socketId).emit("homeStatusChanged", payload);
+    }
     if (dynamicPart == mapState) {
       let socketId = connectedUsers.get(key);
-      console.log(payload,"mapState",connectedUsers);
+      console.log(payload, "mapState", connectedUsers);
       io.to(socketId).emit("mapState", payload);
-      io.sockets.emit("mapStatusBroadcastMessage",{[topicParts[2]]:payload})
-      axios.post(baseApiUrl+mapStatus,{
-        status:payload,
-        robot_uuid:topicParts[2],
-        delete:false,
-      })
+      io.sockets.emit("mapStatusBroadcastMessage", {
+        [topicParts[2]]: payload,
+      });
+      axios.post(baseApiUrl + mapStatus, {
+        status: payload,
+        robot_uuid: topicParts[2],
+        delete: false,
+      });
     }
 
     if (dynamicPart == callState) {
@@ -395,11 +407,11 @@ io.on("connection", (socket) => {
 
   socket.on("deleteMap", (payload) => {
     console.log("deleteMap", payload);
-    axios.post(baseApiUrl+mapStatus,{
-      status:'no map',
-      robot_uuid:payload,
-      delete:true,
-    })
+    axios.post(baseApiUrl + mapStatus, {
+      status: "no map",
+      robot_uuid: payload,
+      delete: true,
+    });
     let StopCallData = " ";
     client.publish(
       baseMqttTopic + `${payload?.id}` + deleteMap,

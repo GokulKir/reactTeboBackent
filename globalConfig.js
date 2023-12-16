@@ -21,6 +21,8 @@ const deleteMap = '/action/deleteMap';
 const readyState = "/info/readyState";
 const homeState = "/info/homeState";
 const mapState = "/info/mapState";
+const warningState = "/info/warning";
+const speedControl = "/info/speed";
  
 
 // const getAllChannel = "https://tebo.domainenroll.com/api/v1"
@@ -55,5 +57,7 @@ module.exports = {
     stopMapping,
     deleteMap,
     mapState,
-    readyState
+    readyState,
+    warningState,
+    speedControl,
 }

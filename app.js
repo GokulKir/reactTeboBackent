@@ -28,6 +28,8 @@ const {
   readyState,
   mapStatus,
   homeState,
+  warningState,
+  speedControl,
 } = require("./globalConfig");
 const axios = require("axios");
 
@@ -106,6 +108,8 @@ app.get("/", (req, res) => {
 // );
 const connectedUsers = new Map();
 let peerConnectedUser = new Map();
+// it contain all the userId : socket id
+const connectedTebo = new Map()
 
 io.use((socket, next) => {
   if (socket.handshake.query) {
@@ -120,7 +124,8 @@ io.on("connection", (socket) => {
   socket.emit("me", socket.id);
 
   socket.join(socket.user);
-  console.log(socket.user, "Connected");
+  console.log(socket.user, "Connected",socket.id);
+  connectedTebo.set(socket.user,socket.id);
 
   //  console.log(io.sockets?.clients(),"io.sockets.clients()")
   socket.on("call", (data) => {
@@ -212,22 +217,35 @@ io.on("connection", (socket) => {
     if (dynamicPart == batteryLevel) {
       var str = `'${payload}'`;
       str = str.replace(/[^0-9]/g, "");
+     const teboId = connectedTebo.get(topicParts[2])
       let batteryPercentage = parseInt(str, 10);
+      let socketId = connectedUsers.get(topicParts[2]);
+      console.log('ConnectedTebo==socketId==================================');
+      console.log(teboId);
+      console.log('====================================');
+      
       axios.post(baseApiUrl + apiBatteryUrl, {
         robot_uuid: topicParts[2],
         charging: false,
         battery_level: batteryPercentage,
       });
+      io.to(teboId).emit("batteryPercentage", batteryPercentage);
+      console.log("====================================");
+      console.log(typeof payload, dynamicPart, payload,);
+      console.log("====================================");
     }
     if (dynamicPart == batteryCharge) {
       // var str = `'${payload}'`;
       // str = str.replace(/[^0-9]/g, "");
 
       let chargingState = payload === "true";
+      const teboId = connectedTebo.get(topicParts[2])
+      io.to(teboId).emit("batteryCharge", chargingState);
 
       console.log("====================================");
       console.log(typeof payload, dynamicPart, payload, chargingState);
       console.log("====================================");
+      // io.to(socketId).emit("mqttMessageReceived", payload);
       axios.post(baseApiUrl + apiBatteryUrl, {
         robot_uuid: topicParts[2],
         charging: chargingState,
@@ -248,17 +266,15 @@ io.on("connection", (socket) => {
     }
     if (dynamicPart == homeState) {
       let socketId = connectedUsers.get(key);
-      console.log(
-        socketId,
-        "====================connectedUsers================",
-        connectedUsers
-      );
-      console.log(payload, "payload");
-
-      console.log("====================================");
+      io.to(socketId).emit("homeStatusChanged", payload);
+    }
+    if(dynamicPart == warningState){
+      let socketId = connectedUsers.get(key);
       io.to(socketId).emit("homeStatusChanged", payload);
     }
     if (dynamicPart == mapState) {
+    console.log("deleteMap", mapState);
+
       let socketId = connectedUsers.get(key);
       console.log(payload, "mapState", connectedUsers);
       io.to(socketId).emit("mapState", payload);
@@ -419,7 +435,7 @@ io.on("connection", (socket) => {
       { qos: 0, retain: false },
       (error) => {
         if (error) {
-          console.error(error);
+          console.error(error.message);
         }
       }
     );
@@ -509,6 +525,21 @@ io.on("connection", (socket) => {
     );
   });
 
+    // speedControl
+    socket.on("speedControl", (payload) => {
+      const data = payload?.data?.toString();
+      console.log(payload,"payload");
+      client.publish(
+        baseMqttTopic + `${payload?.Id}` + speedControl,
+        payload.data,
+        { qos: 0, retain: false },
+        (error) => {
+          if (error) {
+            console.error(error);
+          }
+        }
+      );
+    });
   // Goto Dock
   socket.on("goto-Dock", (payload) => {
     const data = payload?.data?.toString();

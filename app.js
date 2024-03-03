@@ -1,8 +1,12 @@
-const app = require("express")();
+const express = require("express");
+const app = express();
 const server = require("http").createServer(app);
+const KJUR = require("jsrsasign");
+require("dotenv").config();
 const cors = require("cors");
 // const ZigoClient = require('./modal/Zigo')
 
+app.use(express.json());
 const mqtt = require("mqtt");
 const {
   userData,
@@ -30,8 +34,13 @@ const {
   homeState,
   warningState,
   speedControl,
+  robotState,
+  userState,
+  dockState,
+  onlineStatusUpdate,
 } = require("./globalConfig");
 const axios = require("axios");
+const { generateSignat, generateSignatureMiddleware } = require("./middlewere");
 
 function getKeyByValue(map, searchValue) {
   for (const [key, value] of map) {
@@ -78,13 +87,13 @@ const client = mqtt.connect(connectUrl, {
 var robotuuId = null;
 
 client.on("connect", () => {
-  console.log("Connected");
+  // console.log("Connected");
 
   client.subscribe([topic], () => {
-    console.log(`Subscribe to topic '${topic}'`);
+    // console.log(`Subscribe to topic '${topic}'`);
   });
   client.subscribe([userData], () => {
-    console.log(`Subscribe to topic '${userData}'`);
+    // console.log(`Subscribe to topic '${userData}'`);
   });
 });
 
@@ -95,12 +104,38 @@ const io = require("socket.io")(server, {
   },
 });
 
-app.use(cors());
+app.use(cors({ origin: "*", methods: "GET,HEAD,PUT,PATCH,POST,DELETE" }));
 
 const PORT = process.env.PORT || 5000;
 
+const validateRequestMiddleware = (req, res, next) => {
+  const { sessionName, role, sessionKey, userIdentity } = req.body;
+  if (!sessionName || !role || !sessionKey || !userIdentity) {
+    return res.status(400).json({ error: "Missing required fields" });
+  }
+  next();
+};
+
 app.get("/", (req, res) => {
   res.send("Tebo server is Running");
+});
+app.get("/test", (req, res) => {
+  res.send("Tebo server is Running");
+});
+app.post("/test", generateSignat, (req, res) => {
+  console.log("xxx", req.body); // Should log the JSON body sent from Postman
+  res.json({ message: "Test route response", body: req.body });
+});
+
+app.post("/generateSignature", generateSignatureMiddleware, (req, res) => {
+  console.log(req.body);
+  res.json({ signature: req.signature });
+});
+
+app.use((err, req, res, next) => {
+  console.log({ body: req.body });
+  console.error(err.stack);
+  res.status(500).send("Server error");
 });
 
 // app.post("/zego",
@@ -108,8 +143,26 @@ app.get("/", (req, res) => {
 // );
 const connectedUsers = new Map();
 let peerConnectedUser = new Map();
+/**
+ * @type {Map<string,[string]>}
+ */
+let rooms = new Map();
 // it contain all the userId : socket id
-const connectedTebo = new Map()
+const connectedTebo = new Map();
+
+/**
+ *
+ * @param {*} map
+ * @param {*} targetValue
+ */
+function deleteConnectedUserEntryByValue(map, targetValue) {
+  for (let [key, value] of map) {
+    if (value === targetValue) {
+      map.delete(key);
+      break; // Stop after deleting the first matching entry
+    }
+  }
+}
 
 io.use((socket, next) => {
   if (socket.handshake.query) {
@@ -120,30 +173,46 @@ io.use((socket, next) => {
 });
 
 io.on("connection", (socket) => {
-  console.log("==================================== it is connected");
+  // console.log("==================================== it is connected");
   socket.emit("me", socket.id);
 
   socket.join(socket.user);
-  console.log(socket.user, "Connected",socket.id);
-  connectedTebo.set(socket.user,socket.id);
+  // console.log(socket.user, "Connected", socket.id);
+  connectedTebo.set(socket.user, socket.id);
+  // console.log(connectedTebo,"==================================== it is connected");
 
   //  console.log(io.sockets?.clients(),"io.sockets.clients()")
+  let userExisit = false;
   socket.on("call", (data) => {
     let calleeId = data.calleeId;
     let rtcMessage = data.rtcMessage;
-
-    console.log(connectedUsers, "🥴");
-
+    console.log({ rtcMessage }, "*********");
+    let roomId = data.roomId;
+    //  let isRoomexist = rooms.has(roomId)
+    //  if(!isRoomexist){
+    //   rooms.set(roomId, [calleeId]);
+    //  }
+    console.log(connectedUsers, peerConnectedUser, "🥴", calleeId);
+    console.log(1, roomId);
+    rooms.set(roomId, [calleeId]);
+    console.log(2, rooms);
     socket.to(calleeId).emit("newCall", {
       callerId: socket.user,
       rtcMessage: rtcMessage,
+      roomId,
     });
   });
 
   socket.on("answerCall", (data) => {
     let callerId = data.callerId;
     rtcMessage = data.rtcMessage;
+    const roomId = data.roomId;
+    console.log(3, { roomId });
 
+    const room = rooms.get(roomId);
+    console.log(4, { room });
+    // room.push(callerId);
+    console.log(5, { room });
     socket.to(callerId).emit("callAnswered", {
       callee: socket.user,
       rtcMessage: rtcMessage,
@@ -151,7 +220,7 @@ io.on("connection", (socket) => {
   });
 
   socket.on("ICEcandidate", (data) => {
-    console.log("ICEcandidate data.calleeId", data.calleeId);
+    // console.log("ICEcandidate data.calleeId", data.calleeId);
     let calleeId = data.calleeId;
     let rtcMessage = data.rtcMessage;
 
@@ -164,16 +233,34 @@ io.on("connection", (socket) => {
   socket.on("setuuid", (data) => {
     robotuuId = data;
     // topic = `/devlacus/tebo/${data}`
-    console.log(data, "uniqid");
+    // console.log(data, "uniqid");
   });
 
   socket.on("sentUserId", (userId) => {
     console.log("userId:", userId);
     connectedUsers.set(userId, socket.id);
 
-    console.log(connectedUsers);
+    // console.log(connectedUsers);
   });
 
+  socket.on("acknowledgement", (acknowledgementData) => {
+   let  acknowledgementId = acknowledgementData.id
+   let getKeyOfTebo = getKeyByValue(peerConnectedUser, acknowledgementId);
+   
+    const socketId = connectedUsers.get(getKeyOfTebo);
+console.log("🎃😵‍💫😈🎃😵‍💫😈🎃😵‍💫😈🎃😵‍💫😈🎃😵‍💫😈",{socketId},{acknowledgementId},{connectedUsers});
+    io.to(socketId).emit("CredentialAcknowledgement", acknowledgementData.status);
+  });
+
+  socket.on("sentToPhone", (mobileLogData) => {
+    let  acknowledgementId = mobileLogData.id
+    let getKeyOfTebo = getKeyByValue(peerConnectedUser, acknowledgementId);
+    
+     const socketId = connectedUsers.get(getKeyOfTebo);
+      // console.log("🎃😵‍💫😈🎃😵‍💫😈🎃😵‍💫😈🎃😵‍💫😈🎃😵‍💫😈",{socketId},{acknowledgementId},{connectedUsers});
+     io.to(socketId).emit("mobileLogData", mobileLogData.mobileLog);
+   });
+  
   socket.on("getSocketId", (userId) => {
     const socketId = connectedUsers.get(userId);
     socket.emit("getSocketId", socketId);
@@ -181,10 +268,54 @@ io.on("connection", (socket) => {
 
   socket.on("disconnect", () => {
     // socket.broadcast.emit("callEnded");
-
     connectedUsers.forEach((value, key) => {
       if (value === socket.id) {
+        // console.log(
+        //   key,
+        //   "dsd",
+        //   peerConnectedUser,
+        //   { connectedUsers },
+        //   { connectedTebo }
+        // );
+        rooms.forEach((partcpnts, roomId) => {
+          // console.log(partcpnts,roomId,connectedUsers,{rooms},key,"oooooo");
+          const isUserinRoom = partcpnts.some((p) => p === key);
+          if (isUserinRoom) {
+            partcpnts.forEach((pid) => {
+              io.to(connectedUsers.get(pid) || connectedTebo.get(pid)).emit(
+                "participantLeft",
+                {
+                  leftedUser: key,
+                }
+              );
+            });
+            // console.log(roomId,"oooooo roomId");
+
+            rooms.delete(roomId);
+            // console.log({rooms},"oooooo roomId");
+          }
+        });
+        peerConnectedUser.forEach((userValue, userKey) => {
+          peerConnectedUser.delete(key);
+        });
+        connectedTebo.forEach((connectedTeboValue, connectedTeboKey) => {});
         connectedUsers.delete(key);
+      }
+    });
+
+    connectedTebo.forEach((value, key) => {
+      if (value === socket.id) {
+        console.log({ value }, { key }, { socket: socket.id });
+        if (key.startsWith("TEBO")) {
+          axios
+            .post(baseApiUrl + onlineStatusUpdate, {
+              robot_uuid: key,
+              screen_online_status: false,
+              robot_online_status: true,
+            })
+            .then((res) => console.log({ apiBatteryUrl: res }))
+            .catch((error) => console.log({ error }));
+        }
       }
     });
 
@@ -193,7 +324,7 @@ io.on("connection", (socket) => {
 
   socket.on("callUser", ({ userToCall, signalData, from, name }) => {
     io.to(userToCall).emit("callUser", { signal: signalData, from, name });
-    console.log(connectedUsers, "connected user");
+    // console.log(connectedUsers, "connected user");
   });
 
   socket.on("answerCall", (data) => {
@@ -203,8 +334,8 @@ io.on("connection", (socket) => {
   socket.on("disconnect-user", (userId) => {
     connectedUsers.delete(userId);
 
-    console.log("User disconnected:", userId);
-    console.log(connectedUsers);
+    // console.log("User disconnected:", userId);
+    // console.log(connectedUsers);
   });
 
   // The below code is for Mqtt
@@ -217,40 +348,43 @@ io.on("connection", (socket) => {
     if (dynamicPart == batteryLevel) {
       var str = `'${payload}'`;
       str = str.replace(/[^0-9]/g, "");
-     const teboId = connectedTebo.get(topicParts[2])
+      const teboId = connectedTebo.get(topicParts[2]);
       let batteryPercentage = parseInt(str, 10);
       let socketId = connectedUsers.get(topicParts[2]);
-      console.log('ConnectedTebo==socketId==================================');
-      console.log(teboId);
-      console.log('====================================');
-      
-      axios.post(baseApiUrl + apiBatteryUrl, {
-        robot_uuid: topicParts[2],
-        charging: false,
-        battery_level: batteryPercentage,
-      });
+
+      console.log({ apiBatteryUrl: topicParts[2] });
+      axios
+        .post(baseApiUrl + apiBatteryUrl, {
+          robot_uuid: topicParts[2],
+          charging: false,
+          battery_level: batteryPercentage,
+        })
+        .then((res) => console.log({ apiBatteryUrl: res }))
+        .catch((error) => console.log({ error }));
+
       io.to(teboId).emit("batteryPercentage", batteryPercentage);
-      console.log("====================================");
-      console.log(typeof payload, dynamicPart, payload,);
-      console.log("====================================");
     }
     if (dynamicPart == batteryCharge) {
       // var str = `'${payload}'`;
       // str = str.replace(/[^0-9]/g, "");
 
       let chargingState = payload === "true";
-      const teboId = connectedTebo.get(topicParts[2])
+      const teboId = connectedTebo.get(topicParts[2]);
       io.to(teboId).emit("batteryCharge", chargingState);
 
-      console.log("====================================");
-      console.log(typeof payload, dynamicPart, payload, chargingState);
-      console.log("====================================");
+      // console.log("====================================");
+      // console.log(typeof payload, dynamicPart, payload, chargingState);
+      // console.log("====================================");
       // io.to(socketId).emit("mqttMessageReceived", payload);
-      axios.post(baseApiUrl + apiBatteryUrl, {
-        robot_uuid: topicParts[2],
-        charging: chargingState,
-        battery_level: null,
-      });
+
+      axios
+        .post(baseApiUrl + apiBatteryUrl, {
+          robot_uuid: topicParts[2],
+          charging: chargingState,
+          battery_level: null,
+        })
+        .then((res) => console.log({ apiBatteryUrl: res }))
+        .catch((error) => console.log({ error }));
     }
     if (dynamicPart == appConnection) {
       let parsePayload = JSON.parse(payload);
@@ -259,46 +393,119 @@ io.on("connection", (socket) => {
       io.to(socketId).emit("mqttMessageReceived", payload);
     }
     const key = getKeyByValue(peerConnectedUser, topicParts[2]);
+    const keyBeforCall = getKeyByValue(connectedTebo, topicParts[2]);
+
     //  console.log(dynamicPart,"dynamicPart");
     if (dynamicPart == obstacle) {
       let socketId = connectedUsers.get(key);
       io.to(socketId).emit("obstacleDetected", payload);
     }
+
     if (dynamicPart == homeState) {
       let socketId = connectedUsers.get(key);
       io.to(socketId).emit("homeStatusChanged", payload);
     }
-    if(dynamicPart == warningState){
+    if (dynamicPart == robotState) {
+      // let robotStatus = false;
+      // let userScreenStatus = false;
+      let socketId = connectedTebo.get(topicParts[2]);
+      console.log(
+        { connectedTebo },
+        { socketId },
+        { keyBeforCall },
+        { tebo: topicParts[2] }
+      );
+      if (payload === "i am alive") {
+        console.log(
+          "🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥"
+        );
+
+        io.to(socketId).emit("robotState", true);
+      }
+    }
+
+    if (dynamicPart == readyState) {
+      let socketId = connectedUsers.get(key);
+      io.to(socketId).emit("readyState", payload);
+    }
+    if (dynamicPart == warningState) {
       let socketId = connectedUsers.get(key);
       io.to(socketId).emit("homeStatusChanged", payload);
     }
-    if (dynamicPart == mapState) {
-    console.log("deleteMap", mapState);
+    if (dynamicPart == dockState) {
+      const teboId = connectedTebo.get(topicParts[2]);
+      console.log({ teboId }, "****************", payload);
+      io.to(teboId).emit("dockStatus", payload);
+    }
+
+    if (dynamicPart == mapState || dynamicPart == dockState) {
+      // console.log("deleteMap", mapState);
 
       let socketId = connectedUsers.get(key);
-      console.log(payload, "mapState", connectedUsers);
+      console.log(
+        payload,
+        "mapState",
+        { connectedUsers },
+        { peerConnectedUser },
+        { connectedTebo },
+        { key }
+      );
       io.to(socketId).emit("mapState", payload);
       io.sockets.emit("mapStatusBroadcastMessage", {
         [topicParts[2]]: payload,
       });
-      axios.post(baseApiUrl + mapStatus, {
-        status: payload,
-        robot_uuid: topicParts[2],
-        delete: false,
-      });
+      if (
+        payload === "no map" ||
+        payload === "map exists" ||
+        payload === "saving map" ||
+        payload === "map deleted"
+      ) {
+        let statusData = null;
+        switch (payload) {
+          case "saving map":
+            statusData = "map exists";
+            break;
+          case "map deleted":
+            statusData = "no map";
+            break;
+          default:
+            statusData = payload;
+            break;
+        }
+        console.log({ statusData });
+        if (statusData) {
+          axios
+            .post(baseApiUrl + mapStatus, {
+              status: statusData,
+              robot_uuid: topicParts[2],
+              delete: false,
+            })
+            .then((res) => console.log({ apiBatteryUrl: res }))
+            .catch((error) => console.log({ error }));
+        }
+      }
     }
 
     if (dynamicPart == callState) {
       let socketId = connectedUsers.get(key);
       io.to(socketId).emit("call-state", payload);
     }
+
     // console.log(dynamicPart, "dynamicPart");
 
     // console.log(`Received MQTT message from topic '${topic}': ${payload}`);
   });
 
+  client.subscribe("Devlacus/Tebo/+/info/robotState", (err) => {
+    if (err) {
+      console.error("Failed to subscribe to robotState topic:", err);
+    } else {
+      console.log("Successfully subscribed to robotState topic");
+    }
+  });
+
   socket.on("confirmuser", (payload) => {
-    console.log("Received confirmuser event:", payload);
+    // console.log("Received confirmuser event:", payload);
     const data = JSON.stringify(payload);
     client.publish(userData, data, { qos: 0, retain: false }, (error) => {
       if (error) {
@@ -333,10 +540,10 @@ io.on("connection", (socket) => {
   socket.on("move-manual", (payload) => {
     const data = payload?.data?.toString();
     const Id = payload?.Id;
-    console.log(
-      "Received confirmuser event:",
-      baseMqttTopic + `${Id}` + moveManual
-    );
+    // console.log(
+    //   "Received confirmuser event:",
+    //   baseMqttTopic + `${Id}` + moveManual
+    // );
 
     client.publish(
       baseMqttTopic + `${Id}` + moveManual,
@@ -356,14 +563,27 @@ io.on("connection", (socket) => {
   socket.on("tilt-camera", (payload, Id) => {
     const data = payload?.data?.toString();
 
-    console.log(
-      "Received confirmuser event:",
-      baseMqttTopic + `${payload?.Id}` + moveCamera
-    );
+    // console.log(
+    //   "Received confirmuser event:",
+    //   baseMqttTopic + `${payload?.Id}` + moveCamera
+    // );
 
     client.publish(
       baseMqttTopic + `${payload?.Id}` + moveCamera,
       data,
+      { qos: 0, retain: false },
+      (error) => {
+        if (error) {
+          console.error(error);
+        }
+      }
+    );
+  });
+
+  socket.on("userState", (id) => {
+    client.publish(
+      baseMqttTopic + `${id}` + userState,
+      "i am alive",
       { qos: 0, retain: false },
       (error) => {
         if (error) {
@@ -391,7 +611,7 @@ io.on("connection", (socket) => {
 
   // Start Mapping
   socket.on("start-mapping", (payload) => {
-    console.log("jjjjj", payload);
+    // console.log("jjjjj", payload);
     const StartCallData = " ";
     client.publish(
       baseMqttTopic + `${payload?.id}` + startMapping,
@@ -407,7 +627,7 @@ io.on("connection", (socket) => {
 
   // stopMapping
   socket.on("stopMapping", (payload) => {
-    console.log("stopMapping", payload);
+    // console.log("stopMapping", payload);
     let StopCallData = " ";
     client.publish(
       baseMqttTopic + `${payload?.id}` + stopMapping,
@@ -422,12 +642,17 @@ io.on("connection", (socket) => {
   });
 
   socket.on("deleteMap", (payload) => {
-    console.log("deleteMap", payload);
-    axios.post(baseApiUrl + mapStatus, {
-      status: "no map",
-      robot_uuid: payload,
-      delete: true,
-    });
+    // console.log("deleteMap", payload);
+
+    axios
+      .post(baseApiUrl + mapStatus, {
+        status: "no map",
+        robot_uuid: payload,
+        delete: true,
+      })
+      .then((res) => console.log({ apiBatteryUrl: res }))
+      .catch((error) => console.log({ error }));
+
     let StopCallData = " ";
     client.publish(
       baseMqttTopic + `${payload?.id}` + deleteMap,
@@ -448,10 +673,10 @@ io.on("connection", (socket) => {
   // start-meeting
   socket.on("start-meeting", (payload) => {
     const callData = "call Started";
-    console.log(
-      baseMqttTopic + `${payload?.id}` + callState,
-      "baseMqttTopic +`${payload?.id}`+ callState,"
-    );
+    // console.log(
+    //   baseMqttTopic + `${payload?.id}` + callState,
+    //   "baseMqttTopic +`${payload?.id}`+ callState,"
+    // );
     client.publish(
       baseMqttTopic + `${payload?.id}` + callState,
       callData,
@@ -467,10 +692,13 @@ io.on("connection", (socket) => {
   // end-meeting
   socket.on("meeting-ended", (payload) => {
     const callData = "call ended";
-    console.log(baseMqttTopic + `${payload?.id}` + callState, "call ended");
+    let targetTeboId = connectedTebo.get(payload?.id);
+    io.to(targetTeboId).emit("callEnded", "call ended");
+    // console.log(baseMqttTopic + `${payload?.id}` + callState, "call ended");
     socket.to(payload?.id).emit("callEndInfo", {
       data: callData,
     });
+
     client.publish(
       baseMqttTopic + `${payload?.id}` + callState,
       callData,
@@ -483,20 +711,67 @@ io.on("connection", (socket) => {
     );
   });
 
+  socket.on("zoomData", (payload) => {
+    let targetTeboId = connectedTebo.get(payload?.id);
+    console.log("zoom", { targetTeboId });
+    socket.to(targetTeboId).emit("zoomCredentials", {
+      payload,
+    });
+  });
   // Set Map User
-  socket.on("setMapUser", (payload) => {
-    peerConnectedUser.set(payload.from, payload.toId);
-    console.log(peerConnectedUser, "peerConnectedUser");
+  socket.on("setMapUser", (payload, callback) => {
+    try {
+      let targetId = payload?.toId;
+      // const validater = (targetId) => {
+      console.log(1, { peerConnectedUser });
+
+      const valuesOfArray = Array.from(peerConnectedUser.values());
+      console.log(2, { peerConnectedUser });
+
+      let isUserCConnected = valuesOfArray.includes(targetId);
+
+      let connectData = true;
+      if (isUserCConnected) {
+        connectData = false;
+      }
+
+      // }
+      // const validater = await validateData(payload?.toId);
+
+      if (connectData) {
+        peerConnectedUser.set(payload.from, payload.toId);
+        console.log(peerConnectedUser, "peerConnectedUser");
+
+        callback({
+          success: true,
+          message: "Mapping user successful",
+          error: false,
+        });
+      } else {
+        // console.log(2222);
+
+        callback({
+          success: true,
+          message: "Mapping user not successful",
+          error: true,
+        });
+      }
+
+      // Assuming that the operation was successful, you can send a success response
+    } catch (error) {
+      // If an error occurs during the operation, you can send an error response
+      callback({ success: false, message: error.message });
+    }
   });
 
   // tilt camera
   socket.on("end-meeting", (payload) => {
     const data = payload?.data?.toString();
 
-    console.log(
-      "Received confirmuser event:",
-      baseMqttTopic + `${payload?.Id}` + moveCamera
-    );
+    // console.log(
+    //   "Received confirmuser event:",
+    //   baseMqttTopic + `${payload?.Id}` + moveCamera
+    // );
 
     client.publish(
       baseMqttTopic + `${payload?.Id}` + moveCamera,
@@ -525,21 +800,21 @@ io.on("connection", (socket) => {
     );
   });
 
-    // speedControl
-    socket.on("speedControl", (payload) => {
-      const data = payload?.data?.toString();
-      console.log(payload,"payload");
-      client.publish(
-        baseMqttTopic + `${payload?.Id}` + speedControl,
-        payload.data,
-        { qos: 0, retain: false },
-        (error) => {
-          if (error) {
-            console.error(error);
-          }
+  // speedControl
+  socket.on("speedControl", (payload) => {
+    const data = payload?.data?.toString();
+    console.log(payload, "payload");
+    client.publish(
+      baseMqttTopic + `${payload?.Id}` + speedControl,
+      payload.data,
+      { qos: 0, retain: false },
+      (error) => {
+        if (error) {
+          console.error(error);
         }
-      );
-    });
+      }
+    );
+  });
   // Goto Dock
   socket.on("goto-Dock", (payload) => {
     const data = payload?.data?.toString();
@@ -558,6 +833,19 @@ io.on("connection", (socket) => {
   // Goto Meeting End
   socket.on("meeting-end", (payload) => {
     const data = payload?.data?.toString();
+    // deleteConnectedUserEntryByValue(peerConnectedUser, payload?.myId);
+    peerConnectedUser.delete(payload?.myId);
+    rooms.forEach((partcpent, roomId) => {
+      let roomDataWebId = partcpent.some((p) => p === payload?.myId);
+      let roomDataAppId = partcpent.some((p) => p === payload?.Id);
+      if (roomDataWebId) {
+        rooms.delete(roomId);
+      }
+      if (roomDataAppId) {
+        rooms.delete(roomId);
+      }
+    });
+    console.log(6, { rooms });
 
     client.publish(
       baseMqttTopic + `${payload?.Id}` + meetingEnd,
